@@ -32,3 +32,7 @@ void xread(int fd, void *buf, size_t nBytes);
 /** Like write(), but retry on EINTR and EWOULDBLOCK,
  * abort on other errors, and don't return early. */
 void xwrite(int fd, const void *buf, size_t nBytes);
+
+void sendPublicKey(int socket, mpz_t publicKey);
+
+void receivePublicKey(int socket, mpz_t publicKey);

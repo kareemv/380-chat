@@ -9,6 +9,7 @@
 #include <getopt.h>
 #include "dh.h"
 #include "keys.h"
+#include "util.h"
 
 #ifndef PATH_MAX
 #define PATH_MAX 1024
@@ -77,7 +78,27 @@ int initServerNet(int port)
 		error("error on accept");
 	close(listensock);
 	fprintf(stderr, "connection made, starting session...\n");
-	/* at this point, should be able to send/recv on sockfd */
+	
+	/* send server pk */
+	fprintf(stderr, "Sending server public key...\n");
+	if (sendPublicKey(sockfd, server_dh_key.PK) != 0) {
+    return -1;
+  }
+	fprintf(stderr, "Server public key sent\n");
+	
+	/* receive client pk */
+	mpz_t client_pk;
+	mpz_init(client_pk);
+	fprintf(stderr, "Receiving client public key...\n");
+	if (receivePublicKey(sockfd, client_pk) != 0) {
+    mpz_clear(client_pk);
+    return -1;
+  }
+	fprintf(stderr, "Client public key received\n");
+
+	// derive shared secret 
+
+	mpz_clear(client_pk);
 	return 0;
 }
 
@@ -108,8 +129,28 @@ static int initClientNet(char* hostname, int port)
 		error("dhKey generation failed");
 	}
 	fprintf(stderr, "client dhKey generated\n");
+	
+	/* receive server pk  */
+	mpz_t server_pk;
+	mpz_init(server_pk);
+	fprintf(stderr, "Receiving server public key...\n");
+	if (receivePublicKey(sockfd, server_pk) != 0) {
+    mpz_clear(server_pk); 
+    return -1;
+	}
+	fprintf(stderr, "Server public key received\n");
+	
+	/* send client pk */
+	fprintf(stderr, "Sending client public key...\n");
+	if (sendPublicKey(sockfd, client_dh_key.PK) != 0) {
+    mpz_clear(server_pk); 
+    return -1;
+	}
+	fprintf(stderr, "Client public key sent\n");
 
-	/* at this point, should be able to send/recv on sockfd */
+	// derive shared secret 
+
+	mpz_clear(server_pk);
 	return 0;
 }
 

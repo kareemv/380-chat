@@ -22,6 +22,10 @@ static GtkTextMark*   mark; /* used for scrolling to end of transcript, etc */
 static pthread_t trecv;     /* wait for incoming messagess and post to queue */
 void* recvMsg(void*);       /* for trecv */
 
+/* dhKey variables */
+static dhKey server_dh_key; // server ephemeral dhKey
+static dhKey client_dh_key; // client ephemeral dhKey
+
 #define max(a, b)         \
 	({ typeof(a) _a = a;    \
 	 typeof(b) _b = b;    \
@@ -54,6 +58,17 @@ int initServerNet(int port)
 	if (bind(listensock, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0)
 		error("ERROR on binding");
 	fprintf(stderr, "listening on port %i...\n",port);
+
+	/* generate dhKey */
+	initKey(&server_dh_key);
+	if (dhGenk(&server_dh_key) != 0) {
+		fprintf(stderr, "Failed to generate server dhKey\n");
+		close(listensock);
+		shredKey(&server_dh_key);
+		error("dhKey generation failed");
+	}
+	fprintf(stderr, "server dhKey generated\n");
+	
 	listen(listensock,1);
 	socklen_t clilen;
 	struct sockaddr_in  cli_addr;
@@ -84,6 +99,16 @@ static int initClientNet(char* hostname, int port)
 	serv_addr.sin_port = htons(port);
 	if (connect(sockfd,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0)
 		error("ERROR connecting");
+
+	/* generate dhKey */
+	initKey(&client_dh_key);
+	if (dhGenk(&client_dh_key) != 0) {
+		fprintf(stderr, "Failed to generate client dhKey\n");
+		shredKey(&client_dh_key);  
+		error("dhKey generation failed");
+	}
+	fprintf(stderr, "client dhKey generated\n");
+
 	/* at this point, should be able to send/recv on sockfd */
 	return 0;
 }

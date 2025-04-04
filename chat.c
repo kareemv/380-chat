@@ -63,12 +63,12 @@ int initServerNet(int port)
 	/* generate dhKey */
 	initKey(&server_dh_key);
 	if (dhGenk(&server_dh_key) != 0) {
-		fprintf(stderr, "Failed to generate server dhKey\n");
+		fprintf(stderr, "Server: Failed to generate server DH key\n");
 		close(listensock);
 		shredKey(&server_dh_key);
 		error("dhKey generation failed");
 	}
-	fprintf(stderr, "server dhKey generated\n");
+	fprintf(stderr, "Server: DH key generated successfully\n");
 	
 	listen(listensock,1);
 	socklen_t clilen;
@@ -77,24 +77,24 @@ int initServerNet(int port)
 	if (sockfd < 0)
 		error("error on accept");
 	close(listensock);
-	fprintf(stderr, "connection made, starting session...\n");
+	fprintf(stderr, "Server: connection made, starting session...\n");
 	
 	/* send server pk */
-	fprintf(stderr, "Sending server public key...\n");
+	fprintf(stderr, "Server: Sending public key...\n");
 	if (sendPublicKey(sockfd, server_dh_key.PK) != 0) {
     return -1;
   }
-	fprintf(stderr, "Server public key sent\n");
+	fprintf(stderr, "Server: Public key sent successfully\n");
 	
 	/* receive client pk */
 	mpz_t client_pk;
 	mpz_init(client_pk);
-	fprintf(stderr, "Receiving client public key...\n");
+	fprintf(stderr, "Server: Waiting for client public key...\n");
 	if (receivePublicKey(sockfd, client_pk) != 0) {
     mpz_clear(client_pk);
     return -1;
   }
-	fprintf(stderr, "Client public key received\n");
+	fprintf(stderr, "Server: Client public key received successfully\n");
 
 	// derive shared secret 
 
@@ -124,29 +124,29 @@ static int initClientNet(char* hostname, int port)
 	/* generate dhKey */
 	initKey(&client_dh_key);
 	if (dhGenk(&client_dh_key) != 0) {
-		fprintf(stderr, "Failed to generate client dhKey\n");
+		fprintf(stderr, "Client: Failed to generate client DH key\n");
 		shredKey(&client_dh_key);  
 		error("dhKey generation failed");
 	}
-	fprintf(stderr, "client dhKey generated\n");
+	fprintf(stderr, "Client: DH key generated successfully\n");
 	
 	/* receive server pk  */
 	mpz_t server_pk;
 	mpz_init(server_pk);
-	fprintf(stderr, "Receiving server public key...\n");
+	fprintf(stderr, "Client: Waiting for server public key...\n");
 	if (receivePublicKey(sockfd, server_pk) != 0) {
     mpz_clear(server_pk); 
     return -1;
 	}
-	fprintf(stderr, "Server public key received\n");
+	fprintf(stderr, "Client: Server public key received successfully\n");
 	
 	/* send client pk */
-	fprintf(stderr, "Sending client public key...\n");
+	fprintf(stderr, "Client: Sending public key...\n");
 	if (sendPublicKey(sockfd, client_dh_key.PK) != 0) {
     mpz_clear(server_pk); 
     return -1;
 	}
-	fprintf(stderr, "Client public key sent\n");
+	fprintf(stderr, "Client: Public key sent successfully\n");
 
 	// derive shared secret 
 

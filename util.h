@@ -33,6 +33,6 @@ void xread(int fd, void *buf, size_t nBytes);
  * abort on other errors, and don't return early. */
 void xwrite(int fd, const void *buf, size_t nBytes);
 
-void sendPublicKey(int socket, mpz_t publicKey);
+int sendPublicKey(int socket, mpz_t publicKey);
 
-void receivePublicKey(int socket, mpz_t publicKey);
+int receivePublicKey(int socket, mpz_t publicKey);

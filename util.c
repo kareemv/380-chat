@@ -78,3 +78,37 @@ int deserialize_mpz(mpz_t x, int fd)
 	BYTES2Z(x,buf,nB);
 	return 0;
 }
+
+void sendPublicKey(int socket, mpz_t publicKey) {
+	size_t keySize = mpz_sizeinbase(publicKey, 2) / 8 + 1; 
+	unsigned char *keyBuffer = malloc(keySize);
+	if (keyBuffer == NULL) {
+			perror("Failed to allocate memory for public key buffer");
+			return;
+	}
+	mpz_export(keyBuffer, NULL, 1, sizeof(unsigned char), 0, 0, publicKey); 
+	if (xwrite(socket, keyBuffer, keySize) < 0) {
+			perror("Failed to send public key");
+	}
+	free(keyBuffer);
+}
+
+void receivePublicKey(int socket, mpz_t publicKey) {
+	size_t keySize;
+	if (xread(socket, &keySize, sizeof(size_t)) != sizeof(size_t)) {
+			perror("Failed to read key size");
+			return;
+	}
+	unsigned char *keyBuffer = malloc(keySize); 
+	if (keyBuffer == NULL) {
+			perror("Failed to allocate memory for public key buffer");
+			return;
+	}
+	if (xread(socket, keyBuffer, keySize) != keySize) {
+			perror("Failed to read public key");
+			free(keyBuffer);
+			return;
+	}
+	mpz_import(publicKey, keySize, 1, sizeof(unsigned char), 0, 0, keyBuffer); 
+	free(keyBuffer);
+}

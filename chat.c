@@ -75,14 +75,19 @@ int initServerNet(int port)
 		error("ERROR on binding");
 	fprintf(stderr, "listening on port %i...\n",port);
 
-	/* generate dhKey */
+	// Read server long term key
+	dhKey serverLongTermKey;
+	initKey(&serverLongTermKey);
+	readDH("server_long_term_key", &serverLongTermKey);
+
+	// Read client long term public key 
+	dhKey clientLongTermKey;
+	initKey(&clientLongTermKey);
+	readDH("client_long_term_key.pub", &clientLongTermKey);
+
+	// generate server ephemeral key 
 	initKey(&server_dh_key);
-	if (dhGenk(&server_dh_key) != 0) {
-		fprintf(stderr, "Server: Failed to generate server DH key\n");
-		close(listensock);
-		shredKey(&server_dh_key);
-		error("dhKey generation failed");
-	}
+	dhGenk(&server_dh_key);
 	fprintf(stderr, "Server: DH key generated successfully\n");
 	
 	listen(listensock,1);
@@ -94,14 +99,14 @@ int initServerNet(int port)
 	close(listensock);
 	fprintf(stderr, "Server: connection made, starting session...\n");
 	
-	/* send server pk */
+	// send server ephemeral pk 
 	fprintf(stderr, "Server: Sending public key...\n");
 	if (sendPublicKey(sockfd, server_dh_key.PK) != 0) {
     return -1;
   }
 	fprintf(stderr, "Server: Public key sent successfully\n");
 	
-	/* receive client pk */
+	// receive client ephemeral pk 
 	mpz_t client_pk;
 	mpz_init(client_pk);
 	fprintf(stderr, "Server: Waiting for client public key...\n");
@@ -157,16 +162,22 @@ static int initClientNet(char* hostname, int port)
 	if (connect(sockfd,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0)
 		error("ERROR connecting");
 
-	/* generate dhKey */
+	// Read client long term key 
+	dhKey clientLongTermKey;
+	initKey(&clientLongTermKey);
+	readDH("client_long_term_key", &clientLongTermKey);
+
+	// Read server long term public key 
+	dhKey serverLongTermKey;
+	initKey(&serverLongTermKey);
+	readDH("server_long_term_key.pub", &serverLongTermKey);
+
+	// generate client ephemeral key 
 	initKey(&client_dh_key);
-	if (dhGenk(&client_dh_key) != 0) {
-		fprintf(stderr, "Client: Failed to generate client DH key\n");
-		shredKey(&client_dh_key);  
-		error("dhKey generation failed");
-	}
+	dhGenk(&client_dh_key);
 	fprintf(stderr, "Client: DH key generated successfully\n");
 	
-	/* receive server pk  */
+	// receive server ephemeral pk 
 	mpz_t server_pk;
 	mpz_init(server_pk);
 	fprintf(stderr, "Client: Waiting for server public key...\n");
@@ -176,7 +187,7 @@ static int initClientNet(char* hostname, int port)
 	}
 	fprintf(stderr, "Client: Server public key received successfully\n");
 	
-	/* send client pk */
+	// send client ephemeral pk 
 	fprintf(stderr, "Client: Sending public key...\n");
 	if (sendPublicKey(sockfd, client_dh_key.PK) != 0) {
     mpz_clear(server_pk); 

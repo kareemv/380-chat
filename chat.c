@@ -15,6 +15,12 @@
 #define PATH_MAX 1024
 #endif
 
+// encryption constants
+#define KEY_SIZE 32
+
+// shared key derived from DH
+static unsigned char shared_key[KEY_SIZE * 2];
+
 static GtkTextBuffer* tbuf; /* transcript buffer */
 static GtkTextBuffer* mbuf; /* message buffer */
 static GtkTextView*  tview; /* view for transcript */
@@ -97,6 +103,18 @@ int initServerNet(int port)
 	fprintf(stderr, "Server: Client public key received successfully\n");
 
 	// derive shared secret 
+	fprintf(stderr, "Server: Deriving shared secret...\n");
+	unsigned char shared_secret[KEY_SIZE * 2];
+	if (dhFinal(server_dh_key.SK, server_dh_key.PK, client_pk, shared_secret, sizeof(shared_secret)) != 0) {
+		fprintf(stderr, "Server: Failed to derive shared secret\n");
+		mpz_clear(client_pk);
+		return -1;
+	}
+	fprintf(stderr, "Server: Shared secret derived successfully\n");
+	
+	// store shared secret and clear unused field
+	memcpy(shared_key, shared_secret, sizeof(shared_secret));
+	memset(shared_secret, 0, sizeof(shared_secret));
 
 	mpz_clear(client_pk);
 	return 0;
@@ -149,6 +167,18 @@ static int initClientNet(char* hostname, int port)
 	fprintf(stderr, "Client: Public key sent successfully\n");
 
 	// derive shared secret 
+	fprintf(stderr, "Client: Deriving shared secret...\n");
+	unsigned char shared_secret[KEY_SIZE * 2];
+	if (dhFinal(client_dh_key.SK, client_dh_key.PK, server_pk, shared_secret, sizeof(shared_secret)) != 0) {
+		fprintf(stderr, "Client: Failed to derive shared secret\n");
+		mpz_clear(server_pk);
+		return -1;
+	}
+	fprintf(stderr, "Client: Shared secret derived successfully\n");
+	
+	// store shared secret and clear unused field
+	memcpy(shared_key, shared_secret, sizeof(shared_secret));
+	memset(shared_secret, 0, sizeof(shared_secret));
 
 	mpz_clear(server_pk);
 	return 0;

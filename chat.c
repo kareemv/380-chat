@@ -17,9 +17,18 @@
 
 // encryption constants
 #define KEY_SIZE 32
+#define IV_SIZE 16
+#define MAC_SIZE 32
 
 // shared key derived from DH
 static unsigned char shared_key[KEY_SIZE * 2];
+static EVP_CIPHER_CTX *enc_ctx; 
+static EVP_CIPHER_CTX *dec_ctx;
+static unsigned char iv[IV_SIZE];
+
+// function prototypes for crypto
+static int init_crypto();
+static void cleanup_crypto();
 
 static GtkTextBuffer* tbuf; /* transcript buffer */
 static GtkTextBuffer* mbuf; /* message buffer */
@@ -117,6 +126,15 @@ int initServerNet(int port)
 	memset(shared_secret, 0, sizeof(shared_secret));
 
 	mpz_clear(client_pk);
+	
+	// init crypto
+	fprintf(stderr, "Server: Initializing encryption...\n");
+	if (init_crypto() != 0) {
+		fprintf(stderr, "Server: Failed to initialize crypto\n");
+		return -1;
+	}
+	fprintf(stderr, "Server: Secure channel established\n");
+	
 	return 0;
 }
 
@@ -181,11 +199,22 @@ static int initClientNet(char* hostname, int port)
 	memset(shared_secret, 0, sizeof(shared_secret));
 
 	mpz_clear(server_pk);
+	
+	// init crypto
+	fprintf(stderr, "Client: Initializing encryption...\n");
+	if (init_crypto() != 0) {
+		fprintf(stderr, "Client: Failed to initialize crypto\n");
+		return -1;
+	}
+	fprintf(stderr, "Client: Secure channel established\n");
+	
 	return 0;
 }
 
 static int shutdownNetwork()
 {
+	cleanup_crypto();
+	
 	shutdown(sockfd,2);
 	unsigned char dummy[64];
 	ssize_t r;
@@ -194,6 +223,92 @@ static int shutdownNetwork()
 	} while (r != 0 && r != -1);
 	close(sockfd);
 	return 0;
+}
+
+// init enc/dec contexts
+static int init_crypto()
+{
+	// generate random IV
+	if (RAND_bytes(iv, IV_SIZE) != 1) {
+		fprintf(stderr, "Failed to generate secure random IV\n");
+		return -1;
+	}
+	
+	fprintf(stderr, "IV generated: ");
+	for (int i = 0; i < 4; i++) {
+		fprintf(stderr, "%02x", iv[i]);
+	}
+	fprintf(stderr, "...\n");
+	
+	// IV exchange
+	if (isclient) {
+		fprintf(stderr, "Client: Sending IV...\n");
+		if (send(sockfd, iv, IV_SIZE, 0) != IV_SIZE) {
+			fprintf(stderr, "Failed to send IV\n");
+			return -1;
+		}
+		fprintf(stderr, "Client: IV sent successfully\n");
+	} else {
+		fprintf(stderr, "Server: Receiving IV...\n");
+		if (recv(sockfd, iv, IV_SIZE, 0) != IV_SIZE) {
+			fprintf(stderr, "Failed to receive IV\n");
+			return -1;
+		}
+		fprintf(stderr, "Server: IV received: ");
+		for (int i = 0; i < 4; i++) {
+			fprintf(stderr, "%02x", iv[i]);
+		}
+		fprintf(stderr, "...\n");
+	}
+	
+	// create aes_256_ctr contexts
+
+	enc_ctx = EVP_CIPHER_CTX_new();
+	if (enc_ctx == NULL) {
+		fprintf(stderr, "Failed to create encryption context\n");
+		return -1;
+	}
+	
+	if (EVP_EncryptInit_ex(enc_ctx, EVP_aes_256_ctr(), NULL, shared_key, iv) != 1) {
+		fprintf(stderr, "Failed to initialize encryption\n");
+		EVP_CIPHER_CTX_free(enc_ctx);
+		return -1;
+	}
+	fprintf(stderr, "AES-256-CTR encryption initialized\n");
+	
+	dec_ctx = EVP_CIPHER_CTX_new();
+	if (dec_ctx == NULL) {
+		fprintf(stderr, "Failed to create decryption context\n");
+		EVP_CIPHER_CTX_free(enc_ctx);
+		return -1;
+	}
+	
+	if (EVP_DecryptInit_ex(dec_ctx, EVP_aes_256_ctr(), NULL, shared_key, iv) != 1) {
+		fprintf(stderr, "Failed to initialize decryption\n");
+		EVP_CIPHER_CTX_free(enc_ctx);
+		EVP_CIPHER_CTX_free(dec_ctx);
+		return -1;
+	}
+	fprintf(stderr, "AES-256-CTR decryption initialized\n");
+	
+	return 0;
+}
+
+// clean up enc/dec contexts
+static void cleanup_crypto()
+{
+	if (enc_ctx) {
+		EVP_CIPHER_CTX_free(enc_ctx);
+		enc_ctx = NULL;
+	}
+	
+	if (dec_ctx) {
+		EVP_CIPHER_CTX_free(dec_ctx);
+		dec_ctx = NULL;
+	}
+	
+	memset(shared_key, 0, sizeof(shared_key));
+	memset(iv, 0, sizeof(iv));
 }
 
 /* end network stuff. */

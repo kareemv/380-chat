@@ -112,20 +112,20 @@ int initServerNet(int port)
 	
 	// send server ephemeral pk 
 	fprintf(stderr, "Server: Sending public key...\n");
-	sendPublicKey(sockfd, server_dh_key.PK) 
+	sendPublicKey(sockfd, server_dh_key.PK) ;
 	fprintf(stderr, "Server: Public key sent successfully\n");
 	
 	// receive client ephemeral pk 
 	mpz_t client_pk;
 	mpz_init(client_pk);
 	fprintf(stderr, "Server: Waiting for client public key...\n");
-	receivePublicKey(sockfd, client_pk)
+	receivePublicKey(sockfd, client_pk);
 	fprintf(stderr, "Server: Client public key received successfully\n");
 
 	// derive shared secret 
 	fprintf(stderr, "Server: Deriving shared secret...\n");
 	unsigned char shared_secret[KEY_SIZE * 2];
-	dh3Final(serverLongTermKey.SK, serverLongTermKey.PK, server_dh_key.SK, server_dh_key.PK, clientLongTermKey.PK, client_pk, shared_secret, sizeof(shared_secret))
+	dh3Final(serverLongTermKey.SK, serverLongTermKey.PK, server_dh_key.SK, server_dh_key.PK, clientLongTermKey.PK, client_pk, shared_secret, sizeof(shared_secret));
 	fprintf(stderr, "Server: Shared secret derived successfully\n");
 	
 	// store shared secret and clear unused field
@@ -183,18 +183,18 @@ static int initClientNet(char* hostname, int port)
 	mpz_t server_pk;
 	mpz_init(server_pk);
 	fprintf(stderr, "Client: Waiting for server public key...\n");
-	receivePublicKey(sockfd, server_pk)
+	receivePublicKey(sockfd, server_pk);
 	fprintf(stderr, "Client: Server public key received successfully\n");
 	
 	// send client ephemeral pk 
 	fprintf(stderr, "Client: Sending public key...\n");
-	sendPublicKey(sockfd, client_dh_key.PK)
+	sendPublicKey(sockfd, client_dh_key.PK);
 	fprintf(stderr, "Client: Public key sent successfully\n");
 
 	// derive shared secret 
 	fprintf(stderr, "Client: Deriving shared secret...\n");
 	unsigned char shared_secret[KEY_SIZE * 2];
-	dh3Final(clientLongTermKey.SK, clientLongTermKey.PK, client_dh_key.SK, client_dh_key.PK, serverLongTermKey.PK, server_pk, shared_secret, sizeof(shared_secret))
+	dh3Final(clientLongTermKey.SK, clientLongTermKey.PK, client_dh_key.SK, client_dh_key.PK, serverLongTermKey.PK, server_pk, shared_secret, sizeof(shared_secret));
 	fprintf(stderr, "Client: Shared secret derived successfully\n");
 	
 	// store shared secret and clear unused field

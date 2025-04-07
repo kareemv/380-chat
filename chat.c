@@ -132,8 +132,11 @@ int initServerNet(int port)
 	memcpy(shared_key, shared_secret, sizeof(shared_secret));
 	memset(shared_secret, 0, sizeof(shared_secret));
 
+	// clean up keys 
 	mpz_clear(client_pk);
-	
+	shredKey(&serverLongTermKey);
+  	shredKey(&clientLongTermKey);
+
 	// init crypto
 	fprintf(stderr, "Server: Initializing encryption...\n");
 	if (init_crypto() != 0) {
@@ -201,7 +204,10 @@ static int initClientNet(char* hostname, int port)
 	memcpy(shared_key, shared_secret, sizeof(shared_secret));
 	memset(shared_secret, 0, sizeof(shared_secret));
 
+	// clean up keys 
 	mpz_clear(server_pk);
+	shredKey(&clientLongTermKey);
+	shredKey(&serverLongTermKey);
 	
 	// init crypto
 	fprintf(stderr, "Client: Initializing encryption...\n");
@@ -217,6 +223,10 @@ static int initClientNet(char* hostname, int port)
 static int shutdownNetwork()
 {
 	cleanup_crypto();
+
+	// clean up keys 
+	shredKey(&server_dh_key);
+  	shredKey(&client_dh_key);
 	
 	shutdown(sockfd,2);
 	unsigned char dummy[64];

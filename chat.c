@@ -19,16 +19,27 @@
 #define KEY_SIZE 32
 #define IV_SIZE 16
 #define MAC_SIZE 32
+#define NONCE_SIZE 8
+#define MAX_MESSAGE_SIZE 2048
 
 // shared key derived from DH
 static unsigned char shared_key[KEY_SIZE * 2];
+
 static EVP_CIPHER_CTX *enc_ctx; 
 static EVP_CIPHER_CTX *dec_ctx;
 static unsigned char iv[IV_SIZE];
+static uint64_t send_counter = 0;
+static uint64_t recv_counter = UINT64_MAX;
+static int first_message_received = 1;
 
 // function prototypes for crypto
 static int init_crypto();
 static void cleanup_crypto();
+
+static ssize_t encrypt_message(const char* plaintext, size_t pt_len, 
+                            unsigned char* ciphertext, size_t ct_max_len);
+static ssize_t decrypt_message(const unsigned char* ciphertext, size_t ct_len, 
+                            char* plaintext, size_t pt_max_len);
 
 static GtkTextBuffer* tbuf; /* transcript buffer */
 static GtkTextBuffer* mbuf; /* message buffer */
@@ -374,16 +385,27 @@ static void sendMessage(GtkWidget* w /* <-- msg entry widget */, gpointer /* dat
 	gtk_text_buffer_get_end_iter(mbuf,&mend);
 	char* message = gtk_text_buffer_get_text(mbuf,&mstart,&mend,1);
 	size_t len = g_utf8_strlen(message,-1);
-	/* XXX we should probably do the actual network stuff in a different
-	 * thread and have it call this once the message is actually sent. */
+	
+	// encrypt message
+	unsigned char encrypted[MAX_MESSAGE_SIZE + NONCE_SIZE + MAC_SIZE];
+	ssize_t enc_len = encrypt_message(message, len, encrypted, sizeof(encrypted));
+	
+	if (enc_len <= 0) {
+		fprintf(stderr, "Failed to encrypt message\n");
+		free(message);
+		gtk_text_buffer_delete(mbuf, &mstart, &mend);
+		gtk_widget_grab_focus(w);
+		return;
+	}
+	
 	ssize_t nbytes;
-	if ((nbytes = send(sockfd,message,len,0)) == -1)
+	if ((nbytes = send(sockfd, encrypted, enc_len, 0)) == -1)
 		error("send failed");
 
-	tsappend(message,NULL,1);
+	tsappend(message, NULL, 1);
 	free(message);
 	/* clear message text and reset focus */
-	gtk_text_buffer_delete(mbuf,&mstart,&mend);
+	gtk_text_buffer_delete(mbuf, &mstart, &mend);
 	gtk_widget_grab_focus(w);
 }
 
@@ -500,23 +522,124 @@ int main(int argc, char *argv[])
  * main loop for processing: */
 void* recvMsg(void*)
 {
-	size_t maxlen = 512;
-	char msg[maxlen+2]; /* might add \n and \0 */
+	size_t maxlen = MAX_MESSAGE_SIZE + NONCE_SIZE + MAC_SIZE;
+	unsigned char encrypted[maxlen];
+	char msg[MAX_MESSAGE_SIZE + 2];
 	ssize_t nbytes;
+	
 	while (1) {
-		if ((nbytes = recv(sockfd,msg,maxlen,0)) == -1)
+		if ((nbytes = recv(sockfd, encrypted, maxlen, 0)) == -1)
 			error("recv failed");
 		if (nbytes == 0) {
 			/* XXX maybe show in a status message that the other
 			 * side has disconnected. */
 			return 0;
 		}
-		char* m = malloc(maxlen+2);
-		memcpy(m,msg,nbytes);
-		if (m[nbytes-1] != '\n')
-			m[nbytes++] = '\n';
-		m[nbytes] = 0;
-		g_main_context_invoke(NULL,shownewmessage,(gpointer)m);
+		
+		// decrypt
+		ssize_t msg_len = decrypt_message(encrypted, nbytes, msg, MAX_MESSAGE_SIZE);
+		
+		if (msg_len <= 0) {
+			fprintf(stderr, "Failed to decrypt message\n");
+			continue;
+		}
+		
+		msg[msg_len] = '\0';
+		
+		char* m = malloc(msg_len + 2);
+		memcpy(m, msg, msg_len);
+		if (m[msg_len-1] != '\n')
+			m[msg_len++] = '\n';
+		m[msg_len] = 0;
+		g_main_context_invoke(NULL, shownewmessage, (gpointer)m);
 	}
 	return 0;
+}
+
+// encrypt/decrypt message functions
+// [nonce(8)][ciphertext(variable)][mac(32)]
+
+static ssize_t encrypt_message(const char* plaintext, size_t pt_len, 
+                             unsigned char* ciphertext, size_t ct_max_len)
+{
+	if (pt_len > MAX_MESSAGE_SIZE) {
+		fprintf(stderr, "Message too large\n");
+		return -1;
+	}
+	
+	if (ct_max_len < pt_len + NONCE_SIZE + MAC_SIZE) {
+		fprintf(stderr, "Buffer too small for encrypted message\n");
+		return -1;
+	}
+	
+	int ct_len = 0;
+	int tmp_len = 0;
+	
+	uint64_t nonce = send_counter++;
+	fprintf(stderr, "Encrypting message: nonce=%lu, plaintext_len=%lu\n", nonce, pt_len);
+	memcpy(ciphertext, &nonce, NONCE_SIZE);
+	
+	if (EVP_EncryptUpdate(enc_ctx, ciphertext + NONCE_SIZE, &tmp_len, 
+						 (const unsigned char*)plaintext, pt_len) != 1) {
+		fprintf(stderr, "Encryption failed\n");
+		return -1;
+	}
+	ct_len = tmp_len;
+	
+	unsigned char mac[MAC_SIZE];
+	HMAC(EVP_sha256(), shared_key + KEY_SIZE, KEY_SIZE, 
+		 ciphertext, NONCE_SIZE + ct_len, 
+		 mac, NULL);
+	
+	memcpy(ciphertext + NONCE_SIZE + ct_len, mac, MAC_SIZE);
+	
+	return NONCE_SIZE + ct_len + MAC_SIZE;
+}
+
+
+static ssize_t decrypt_message(const unsigned char* ciphertext, size_t ct_len, 
+                             char* plaintext, size_t pt_max_len)
+{
+	if (ct_len < NONCE_SIZE + MAC_SIZE) {
+		fprintf(stderr, "Message too short\n");
+		return -1;
+	}
+	
+	uint64_t nonce;
+	memcpy(&nonce, ciphertext, NONCE_SIZE);
+	
+	unsigned char computed_mac[MAC_SIZE];
+	HMAC(EVP_sha256(), shared_key + KEY_SIZE, KEY_SIZE, 
+		 ciphertext, ct_len - MAC_SIZE, 
+		 computed_mac, NULL);
+		 
+	if (memcmp(computed_mac, ciphertext + ct_len - MAC_SIZE, MAC_SIZE) != 0) {
+		fprintf(stderr, "MAC verification failed - message integrity compromised\n");
+		return -1;
+	}
+	
+	if (first_message_received) {
+		first_message_received = 0;
+		recv_counter = nonce;
+	} else if (nonce <= recv_counter) {
+		fprintf(stderr, "Possible replay attack detected: received nonce=%lu, expected > %lu\n", nonce, recv_counter);
+		return -1;
+	} else {
+		recv_counter = nonce;
+	}
+	
+	int pt_len = 0;
+	if (EVP_DecryptUpdate(dec_ctx, (unsigned char*)plaintext, &pt_len, 
+						 ciphertext + NONCE_SIZE, ct_len - NONCE_SIZE - MAC_SIZE) != 1) {
+		fprintf(stderr, "Decryption failed\n");
+		return -1;
+	}
+	
+	if (pt_len < pt_max_len) {
+		plaintext[pt_len] = '\0';
+	} else {
+		plaintext[pt_max_len - 1] = '\0';
+	}
+	
+	return pt_len;
 }

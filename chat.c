@@ -137,6 +137,30 @@ int initServerNet(int port)
 	shredKey(&serverLongTermKey);
   	shredKey(&clientLongTermKey);
 
+	// Verify authentication
+	fprintf(stderr, "Server: Verifying authentication...\n");
+
+	unsigned char server_mac[64]; 
+	char* message = "auth-verification-token"; 
+
+	// Generate HMAC
+	HMAC(EVP_sha512(), shared_key, KEY_SIZE * 2, (unsigned char*)message, 
+			strlen(message), server_mac, NULL);
+
+	// Send authentication token
+	fprintf(stderr, "Server: Sending authentication token...\n");
+	xwrite(sockfd, server_mac, 64);
+
+	// Get client response (1 for match, 0 for failure)
+	unsigned char response;
+	xread(sockfd, &response, 1);
+
+	if (response != 1) {
+		fprintf(stderr, "Server: Authentication failed - client derived different key\n");
+		return -1;
+	}
+	fprintf(stderr, "Server: Authentication successful\n");
+
 	// init crypto
 	fprintf(stderr, "Server: Initializing encryption...\n");
 	if (init_crypto() != 0) {
@@ -208,6 +232,38 @@ static int initClientNet(char* hostname, int port)
 	mpz_clear(server_pk);
 	shredKey(&clientLongTermKey);
 	shredKey(&serverLongTermKey);
+	
+	// Verify authentication
+	fprintf(stderr, "Client: Verifying authentication...\n");
+
+	// Receive servers authentication token
+	unsigned char server_mac[64]; 
+	xread(sockfd, server_mac, 64);
+	fprintf(stderr, "Client: Received authentication token\n");
+
+	// HMAC key
+	unsigned char client_mac[64]; 
+	char* message = "auth-verification-token"; 
+
+	// Generate HMAC
+	HMAC(EVP_sha512(), shared_key, KEY_SIZE * 2, (unsigned char*)message, 
+		 strlen(message), client_mac, NULL);
+
+	// Compare MACs
+	unsigned char response = 0;
+	if (memcmp(server_mac, client_mac, 64) == 0) {
+		response = 1;
+		fprintf(stderr, "Client: Authentication successful\n");
+	} else {
+		fprintf(stderr, "Client: Authentication failed - derived different key than server\n");
+	}
+
+	// Send response to server
+	xwrite(sockfd, &response, 1);
+
+	if (response != 1) {
+		return -1;
+	}
 	
 	// init crypto
 	fprintf(stderr, "Client: Initializing encryption...\n");
@@ -456,11 +512,19 @@ int main(int argc, char *argv[])
 	 * show the messages in the main window instead of stderr/stdout.  If
 	 * you decide to give that a try, this might be of use:
 	 * https://docs.gtk.org/gtk4/func.is_initialized.html */
-	if (isclient) {
-		initClientNet(hostname,port);
-	} else {
-		initServerNet(port);
-	}
+    int init_result;
+    if (isclient) {
+      init_result = initClientNet(hostname,port);
+    } else {
+      init_result = initServerNet(port);
+    }
+
+    // Exit if authentication failed
+    if (init_result != 0) {
+      fprintf(stderr, "Authentication failed, aborting connection.\n");
+      shutdownNetwork();
+      return -1;
+    }
 
 	/* setup GTK... */
 	GtkBuilder* builder;
